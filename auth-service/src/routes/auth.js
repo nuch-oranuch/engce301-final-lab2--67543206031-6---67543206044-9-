@@ -1,9 +1,37 @@
 const express  = require('express');
 const bcrypt   = require('bcryptjs');
 const { pool } = require('../db/db');
+const db = require('../db/db');
 const { generateToken, verifyToken } = require('../middleware/jwtUtils');
 
 const router = express.Router();
+
+// --- ระบบ Register (สำหรับ Test Case T2) ---
+router.post('/register', async (req, res) => {
+    const { username, email, password } = req.body;
+    try {
+        const salt = await bcrypt.genSalt(10);
+        const password_hash = await bcrypt.hash(password, salt);
+
+        const result = await pool.query(
+            `INSERT INTO users (username, email, password_hash) 
+             VALUES ($1, $2, $3) RETURNING id, username, email`,
+            [username, email, password_hash]
+        );
+
+        res.status(201).json({
+            message: 'User registered successfully',
+            user: result.rows[0]
+        });
+    } catch (err) {
+        console.error("🔥 ERROR จริงๆ คือ:", err);
+        // พ่น Error ของจริงออกมาดูหน้าจอเลย จะได้รู้ว่าพังที่ไหน!
+        res.status(500).json({ 
+            error: "พังจ้า!", 
+            real_message: err.message 
+        });
+    }
+});
 
 // ── Helper: ส่ง log ไปที่ Log Service ────────────────────────────────
 async function logEvent({ service='auth-service', level, event, userId, ip, method, path, statusCode, message, meta }) {
