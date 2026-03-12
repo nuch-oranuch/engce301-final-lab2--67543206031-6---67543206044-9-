@@ -1,99 +1,22 @@
-# ENGCE301 Final Lab 1: Microservices + HTTPS + Lightweight Logging
+# ENGCE301 Final Lab Set 2: Microservices Scale-Up
 
-##  สมาชิกในกลุ่ม
-1. [อรนุช ลุงหลิ่ง] | รหัสนักศึกษา: [67543206031-6]
-2. [ชนาธิป ระวิมี] | รหัสนักศึกษา: [67543206044-9]
+**จัดทำโดย:**
+1. [อรนุช ลุงหลิ่ง] รหัสนักศึกษา: [67543206031-6]
+2. [ชนาธิป ระวิมี] รหัสนักศึกษา: [67543206044-9]
 
----
+## 1. Architecture Diagram (Database-per-Service)
+*หมายเหตุ: เนื่องจากข้อจำกัดด้านเวลาในการสอบ จึงได้ทำการทดสอบและพัฒนาระบบสถาปัตยกรรมนี้บน Local Environment จนสมบูรณ์ 100% ก่อนขึ้น Cloud*
 
-##  Architecture Diagram
+ระบบประกอบด้วย 3 Services หลักที่แยก Database ออกจากกันอย่างเด็ดขาด:
+- **Auth Service** (Port 3001) -> เชื่อมต่อ `auth-db` (จัดการ users)
+- **Task Service** (Port 3002) -> เชื่อมต่อ `task-db` (จัดการ tasks)
+- **User Service** (Port 3003) -> เชื่อมต่อ `user-db` (จัดการ profiles)
+- ทุก Service ใช้ `JWT_SECRET` ตัวเดียวกันในการยืนยันตัวตน
 
-```text
-Browser / Postman
-       │
-       │ HTTPS :443  (HTTP :80 redirect → HTTPS)
-       ▼
-┌─────────────────────────────────────────────────────────────┐
-│   Nginx (API Gateway + TLS Termination + Rate Limiter)      │
-│                                                             │
-│  /api/auth/* → auth-service:3001    (ไม่ต้องมี JWT)            │
-│  /api/tasks/* → task-service:3002    [JWT required]         │
-│  /api/logs/* → log-service:3003     [JWT required]          │
-│  /             → frontend:80          (Static HTML)         │
-└───────┬────────────────┬──────────────────┬─────────────────┘
-        │                │                  │
-        ▼                ▼                  ▼
-┌──────────────┐ ┌───────────────┐ ┌──────────────────┐
-│  Auth Svc    │ │  Task Svc     │ │  Log Service     │
-│   :3001      │ │   :3002       │ │   :3003          │
-│              │ │               │ │                  │
-│ • Login      │ │ • CRUD Tasks  │ │ • POST /api/logs │
-│ • /verify    │ │ • JWT Guard   │ │ • GET  /api/logs │
-│ • /me        │ │ • Log events  │ │ • เก็บลง DB       │
-└──────┬───────┘ └───────┬───────┘ └──────────────────┘
-       │                 │
-       └────────┬────────┘
-                ▼
-     ┌─────────────────────┐
-     │   PostgreSQL        │
-     │  (1 shared DB)      │
-     │  • users  table     │
-     │  • tasks  table     │
-     │  • logs   table     │
-     └─────────────────────┘
+## 2. Gateway Strategy ที่เลือก
+**เลือก Option A: Frontend/Client เรียก URL ของแต่ละ service โดยตรง**
+- **เหตุผล:** เนื่องจากสถาปัตยกรรมมีการแยก Port ของแต่ละ Service อย่างชัดเจนอยู่แล้ว (3001, 3002, 3003) การเรียกใช้งานโดยตรงจึงมีความรวดเร็ว ลดความซับซ้อนในการตั้งค่า Nginx เพิ่มเติม และทำให้ง่ายต่อการ Debug ปัญหาของแต่ละ Service ในระหว่างการสอบ
 
-```
-
----
-
-##  วิธีรันโปรเจกต์
-
-1. **สร้าง Self-Signed Certificate** สำหรับ Nginx (รันแค่ครั้งแรก)
-```bash
-./scripts/gen-certs.sh
-
-```
-
-
-2. **เตรียม Environment Variables**
-```bash
-cp .env.example .env
-
-```
-
-
-3. **Build และ Start Docker Containers**
-```bash
-docker compose up --build
-
-```
-
-
-> **Note:** เมื่อ Container รันครบทุกตัวแล้ว (Status = healthy) สามารถเข้าใช้งานเว็บได้ที่ `https://localhost` (หากเบราว์เซอร์แจ้งเตือนเรื่อง Certificate ให้กด Advanced -> Accept the risk / Proceed to localhost เพื่อเข้าสู่เว็บไซต์)
-
-
-
----
-
-##  Seed Users
-
-ระบบนี้ออกแบบมาแบบ **ไม่มี Register** (ใช้ Seed Users เท่านั้น) สามารถใช้ข้อมูลด้านล่างนี้ในการ Login:
-
-| Username | Email | Password (Plain-text) | Role |
-| --- | --- | --- | --- |
-| **alice** | `alice@lab.local` | `alice123` | member |
-| **bob** | `bob@lab.local` | `bob456` | member |
-| **admin** | `admin@lab.local` | `adminpass` | admin |
-
----
-
-##  อธิบายการทำงานของ HTTPS ในระบบนี้
-
-ในสถาปัตยกรรม Microservices ของโปรเจกต์นี้ **HTTPS ทำงานโดยมี Nginx เป็น API Gateway และทำหน้าที่ TLS Termination (การถอดรหัส SSL/TLS)** โดยมีโฟลว์การทำงานดังนี้:
-
-1. **HTTP to HTTPS Redirect:** Nginx จะดักจับ Request ที่เข้ามาทาง Port 80 (HTTP) และทำการบังคับ Redirect (`HTTP 301`) ไปที่ Port 443 (HTTPS) อัตโนมัติ เพื่อให้การเชื่อมต่อระหว่างเบราว์เซอร์และเซิร์ฟเวอร์ถูกเข้ารหัสทั้งหมด
-2. **TLS Termination ที่ Gateway:** การเข้ารหัสและถอดรหัสด้วย Self-Signed Certificate (`cert.pem` และ `key.pem`) จะเกิดขึ้นและจบลงที่ตัว Nginx เท่านั้น
-3. **Internal Routing:** หลังจาก Nginx ถอดรหัสคำขอเรียบร้อยแล้ว จะทำหน้าที่เป็น Reverse Proxy เพื่อส่งต่อข้อมูลเหล่านั้นไปยัง Service ด้านหลัง (Auth, Task, Log, Frontend) ผ่านโปรโตคอล HTTP ธรรมดาภายในเครือข่ายของ Docker (`taskboard-net`) ซึ่งมีความปลอดภัยอยู่แล้วเนื่องจากเป็นการสื่อสารภายในเครือข่ายปิดที่บุคคลภายนอกเข้าถึงไม่ได้
-4. **Security & Rate Limiting:** นอกจากการจัดการเรื่อง HTTPS แล้ว Nginx ยังช่วยเพิ่ม Security Headers ให้กับ Response และทำ Rate Limiting ก่อนที่ Request จะไปถึง Backend เพื่อป้องกันการโจมตีแบบ Brute-force
-
-```
+## 3. ปัญหาที่พบและวิธีแก้ไข
+- **ปัญหา:** API `/register` ไม่ทำงานและแจ้งเตือนว่า "อีเมลมีคนใช้แล้ว" ตลอดเวลา
+- **วิธีแก้ไข:** ตรวจสอบ Logs พบว่าเกิดจากตัวแปรการเชื่อมต่อฐานข้อมูลผิดพลาด (`db is not defined` และ `db.query is not a function`) จึงได้ทำการแก้ไข Source Code ในไฟล์ `auth.js` โดยการดึง `pool` จาก `db.js` มาใช้อย่างถูกต้อง ทำให้ระบบสมัครสมาชิกทำงานได้สมบูรณ์

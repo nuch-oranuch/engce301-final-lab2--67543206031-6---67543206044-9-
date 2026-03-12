@@ -42,7 +42,7 @@ services:
       DB_PASSWORD: secretpassword
       DB_NAME: authdb
       PORT: 3001
-      JWT_SECRET: my-super-secret-key # 🔑 คีย์นี้ต้องเหมือนกันทุก Service!
+      JWT_SECRET: my-super-secret-key 
     depends_on:
       - auth-db
 
